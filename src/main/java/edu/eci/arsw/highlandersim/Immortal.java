@@ -2,12 +2,14 @@ package edu.eci.arsw.highlandersim;
 
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class Immortal extends Thread {
 
     private ImmortalUpdateReportCallback updateCallback=null;
     
-    private int health;
+    private AtomicInteger health;
     
     private int defaultDamageValue;
 
@@ -17,21 +19,33 @@ public class Immortal extends Thread {
 
     private final Random r = new Random(System.currentTimeMillis());
 
+    private AtomicBoolean trabajando,vivo;
+
 
     public Immortal(String name, List<Immortal> immortalsPopulation, int health, int defaultDamageValue, ImmortalUpdateReportCallback ucb) {
         super(name);
         this.updateCallback=ucb;
         this.name = name;
         this.immortalsPopulation = immortalsPopulation;
-        this.health = health;
+        this.health = new AtomicInteger(health);
         this.defaultDamageValue=defaultDamageValue;
+        this.trabajando=new AtomicBoolean(false);
+        this.vivo=new AtomicBoolean(true);
     }
 
     public void run() {
-
-        while (true) {
+        this.trabajando.getAndSet(true);
+        while (vivo.get()) {
             Immortal im;
-
+            while(!trabajando.get()){
+                synchronized (this){
+                    try {
+                        this.wait();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
             int myIndex = immortalsPopulation.indexOf(this);
 
             int nextFighterIndex = r.nextInt(immortalsPopulation.size());
@@ -40,10 +54,21 @@ public class Immortal extends Thread {
             if (nextFighterIndex == myIndex) {
                 nextFighterIndex = ((nextFighterIndex + 1) % immortalsPopulation.size());
             }
+            if (getHealth().get() <= 0){
+                this.getVivo().getAndSet(false);
+                getHealth().set(0);
+                immortalsPopulation.remove(this);
 
-            im = immortalsPopulation.get(nextFighterIndex);
 
-            this.fight(im);
+
+            }
+            synchronized (immortalsPopulation.get(nextFighterIndex)){
+                im = immortalsPopulation.get(nextFighterIndex);
+            }
+
+            if(this.getVivo().get()) {
+                this.fight(im);
+            }
 
             try {
                 Thread.sleep(1);
@@ -56,22 +81,29 @@ public class Immortal extends Thread {
     }
 
     public void fight(Immortal i2) {
-
-        if (i2.getHealth() > 0) {
-            i2.changeHealth(i2.getHealth() - defaultDamageValue);
-            this.health += defaultDamageValue;
-            updateCallback.processReport("Fight: " + this + " vs " + i2+"\n");
-        } else {
-            updateCallback.processReport(this + " says:" + i2 + " is already dead!\n");
+        boolean vA;
+        synchronized (i2){
+            vA = i2.getHealth().get() > 0;
+            if (vA) {
+                i2.getHealth().getAndAdd(- defaultDamageValue);
+                this.health.getAndAdd(defaultDamageValue);
+                updateCallback.processReport("Fight: " + this + " vs " + i2 + "\n");
+            } else {
+                updateCallback.processReport(this + " says:" + i2 + " is already dead!\n");
+                return;
+            }
         }
 
+
+
+
     }
 
-    public void changeHealth(int v) {
-        health = v;
-    }
 
-    public int getHealth() {
+
+
+
+    public AtomicInteger getHealth() {
         return health;
     }
 
@@ -80,5 +112,23 @@ public class Immortal extends Thread {
 
         return name + "[" + health + "]";
     }
+
+    public AtomicBoolean isTrabajando() {
+        return trabajando;
+    }
+
+    public void setTrabajando(boolean trabajando) {
+        this.trabajando.getAndSet(trabajando);
+    }
+
+    public synchronized void despierta() {
+        this.setTrabajando(true);
+        this.notify();
+    }
+
+    public AtomicBoolean getVivo() {
+        return vivo;
+    }
+
 
 }
